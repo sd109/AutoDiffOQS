@@ -1,19 +1,25 @@
 
 
 
-# ----------------------------------------------- Lindblad Liouvillian ----------------------------------------------- #
 
+# -------------------------------------------------------------------------------------------------------------------- #
+#                                           Generators (Lindblad, BRME & PME)                                          #
+# -------------------------------------------------------------------------------------------------------------------- #
+
+
+
+# ----------------------------------------------------- Lindblad ----------------------------------------------------- #
 
 # Inspired by QuantumOpticsBase.jl's liouvillian implementation but adapted to work with Zygote auto-diff
 
 spre(op::AbstractMatrix) = kron(I(size(op, 1)), transpose(op))
 spost(op::AbstractMatrix) = kron(op, I(size(op, 1)))
-dagger(op::AbstractMatrix) = conj(transpose(op))
+# dagger(op::AbstractMatrix) = conj(transpose(op))
 
 function liouvillian(H, c_ops)
     L = spre(-1im*H) + spost(1im*H)
     for op in c_ops
-        op_dagger = dagger(op)
+        op_dagger = op'
         op_dagger_op = 0.5*op_dagger*op
         L -= spre(op_dagger_op) + spost(op_dagger_op)
         L += spre(op) * spost(op_dagger)
@@ -22,10 +28,14 @@ function liouvillian(H, c_ops)
 end
 
 
+# ------------------------------------------------------- BRME ------------------------------------------------------- #
+
 function bloch_redfield_tensor(H::AbstractMatrix, a_ops::Array; c_ops=[], use_secular=true, secular_cutoff=0.1)
     
+    H = Hermitian(complex(H))  # H must be complex so that ChainRules.eigen_rev rule works correctly
     # Use the energy eigenbasis
-    H_evals, transf_mat = eigen(Hermitian(complex(H))) # H must be complex so that ChainRules.eigen_rev rule works correctly
+    H_evals, transf_mat = eigen(H)
+    # H_evals, transf_mat = eigen(Zygote.@showgrad(H))
     
     #Define function for transforming to Hamiltonian eigenbasis
     to_Heb(op, U) = inv(U) * complex(op) * U
@@ -39,7 +49,7 @@ function bloch_redfield_tensor(H::AbstractMatrix, a_ops::Array; c_ops=[], use_se
     
     #If only Lindblad collapse terms (no a_ops given) then we're done
     if K==0
-        return L #Liouvillian is in the energy eigenbasis here
+        return L, transf_mat #Liouvillian is in the energy eigenbasis here
     end
 
     #Transform interaction operators to Hamiltonian eigenbasis
@@ -99,19 +109,51 @@ function bloch_redfield_tensor(H::AbstractMatrix, a_ops::Array; c_ops=[], use_se
     R = sparse(data) #Remove any zero values and convert to sparse array
 
     #Add Bloch-Redfield part to unitary dynamics and Lindblad Liouvillian calculated above
-    return L+R
+    return L+R, transf_mat
 
 end #Function
 
 
+# -------------------------------------------------------- PME ------------------------------------------------------- #
 
+function pauli_generator(H, a_ops)
 
-function expLt(H, c_ops, t, ρ0)
-    L = liouvillian(H, c_ops)
-    ρt_vec = exp(L*t)*reshape(ρ0, :)
-    ρt = reshape(ρt_vec, size(ρ0)...)
-    return ρt
+    N = size(H, 1)
+    K = length(a_ops)
+
+    #Make complex Hermitian explicitly so that ChainRules.eigen_rev works properly
+	H = Hermitian(complex(H))
+    # Get eigenenergy differences
+    evals, transf_mat = eigen(H)
+    inv_transf_mat = inv(transf_mat)
+    diffs = evals' .- evals #Matrix of eigenenergy differences
+
+    #Pre-allocate output matrix
+    W_matrix = zeros(N, N)
+    # W_matrix = Zygote.bufferfrom(zeros(N, N))
+    for i in 1:K #Loop through a_ops    
+        A_eb = inv_transf_mat * a_ops[i][1] * transf_mat
+		W_matrix += real(a_ops[i][2].(diffs) .* A_eb .* A_eb') #Can we enforce real here? I think so since we're doing |<x|A|y>|^2
+	end
+
+    #Add additional required term to each diagonal element of L
+    # L = Zygote.bufferfrom(W_matrix)
+    # for i in 1:N
+    #     L[i, i] -= sum(L[:, i])
+    # end
+    #Buffer version above doesn't work properly (result is right but gradients are wrong with no error or warning...)
+    #Use this (less efficient) method for now
+    L = W_matrix - diagm(sum.(eachcol(W_matrix)))
+
+    return L, transf_mat
+    # return copy(L), transf_mat
 end
+
+
+
+# -------------------------------------------------------------------------------------------------------------------- #
+#                                                     Steady states                                                    #
+# -------------------------------------------------------------------------------------------------------------------- #
 
 
 #Can't use nullspace method here because nullspace(::ComplexMatrix) internally uses non-julia functions for svd calc (unlike nullspace(::RealMatrix) case)
@@ -125,24 +167,28 @@ function steady_state(L, ρ0)
 end
 
 
-#Float/Complex errors are sometimes encountered in Zygote if H is real here, but adding complex(H) seems to be a workaround
 function bloch_redfield_steady_state(H, a_ops, ρ0; kwargs...)
-    U = eigvecs(Hermitian(complex(H))) #Get eigenbasis transformation matrix -- H must be complex so that ChainRules.eigen_rev rule works correctly
-    # _, U = eigen(Hermitian(H)) #Get eigenbasis transformation matrix
-    R = bloch_redfield_tensor(H, a_ops; kwargs...)
+    R, U = bloch_redfield_tensor(H, a_ops; kwargs...)
+    # R, U = bloch_redfield_tensor(Zygote.@showgrad(H), a_ops; kwargs...)
     ρ0_eb = inv(U) * ρ0 * U #Transform to eigenbasis
     ss_eb = steady_state(R, ρ0_eb)
     return U * ss_eb * inv(U) #Transform back from eigenbasis
 end
 
 
-function ode_dynamics(L, ρ0, times; kwargs...)
-    prob = ODEProblem((u, p, t) -> p * u, complex(reshape(ρ0, :)), extrema(times), L) #ODE 'parameters' are just the liouvillian matrix L
-    return solve(prob; saveat=times, kwargs...)
-end 
+function pauli_steady_state(H, a_ops, ρ0)
+    W, U = pauli_generator(H, a_ops)
+    # W, U = pauli_generator(Zygote.@showgrad(H), a_ops)
+    ρ0_eb = inv(U) * ρ0 * U
+    P0 = real(diag(ρ0_eb))
+    vals, vecs = eigen(W)
+    idxs = findall(abs.(vals) .< 1e-15)
+    @show idxs
+    P_ss = sum(vecs[:, i] * vecs[:, i]' * P0 for i in idxs)
+    ss_eb = diagm(P_ss) / sum(P_ss)
+    return U * ss_eb * inv(U)
+end
 
-
-# ------------------------------------------- Thermal (Gibbs) steady state ------------------------------------------- #
 
 function gibbs_state(H, T)
     A = exp(-e*H/(kb*T))
@@ -151,3 +197,27 @@ function gibbs_state(H, T)
 end
 
 gibbs_dist(H, T) = diag(gibbs_state(H, T))
+
+
+
+# -------------------------------------------------------------------------------------------------------------------- #
+#                                                       Dynamics                                                       #
+# -------------------------------------------------------------------------------------------------------------------- #
+
+
+function expLt(H, c_ops, t, ρ0)
+    L = liouvillian(H, c_ops)
+    ρt_vec = exp(L*t)*reshape(ρ0, :)
+    ρt = reshape(ρt_vec, size(ρ0)...)
+    return ρt
+end
+
+function ode_dynamics(L, ρ0, times; kwargs...)
+    prob = ODEProblem((u, p, t) -> p * u, complex(reshape(ρ0, :)), extrema(times), L) #ODE 'parameters' are just the liouvillian matrix L
+    return solve(prob; saveat=times, kwargs...)
+end
+
+function ode_dynamics_populations(L, ρ0, times; kwargs...)
+    sol = ode_dynamics(L, ρ0, times; save_idxs=diagind(ρ0))
+    return real(sol[:, :])
+end
