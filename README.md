@@ -1,3 +1,3 @@
 # AutoDiffOQS
 
-A package for modelling open quantum systems which is fully auto-differentiable (via Zygote.jl).
+An auto-differentiable implementation of various open quantum systems models (utilizing [Zygote.jl](https://github.com/FluxML/Zygote.jl)).
