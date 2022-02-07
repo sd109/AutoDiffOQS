@@ -32,6 +32,9 @@ end
 
 function bloch_redfield_tensor(H::AbstractMatrix, a_ops::Array; c_ops=[], use_secular=true, secular_cutoff=0.1)
     
+    #Check that a_ops are all Hermitian
+    all(is_herm.(getindex(a_ops, 1))) || error("All 'A' operators must be Hermitian")
+
     H = Hermitian(complex(H))  # H must be complex so that ChainRules.eigen_rev rule works correctly
     # Use the energy eigenbasis
     H_evals, transf_mat = eigen(H)  
@@ -114,6 +117,9 @@ end #Function
 
 function pauli_generator(H, a_ops)
 
+    #Check that a_ops are all Hermitian
+    all(is_herm.(getindex(a_ops, 1))) || error("All 'A' operators must be Hermitian")
+
     N = size(H, 1)
     K = length(a_ops)
 
@@ -172,11 +178,10 @@ end
 
 function pauli_steady_state(H, a_ops, ρ0)
     W, U = pauli_generator(H, a_ops)
-    ρ0_eb = inv(U) * ρ0 * U
+    ρ0_eb = to_Heb(ρ0, U) #inv(U) * ρ0 * U
     P0 = real(diag(ρ0_eb))
     vals, vecs = eigen(W)
     idxs = findall(abs.(vals) .< 1e-15)
-    @show idxs
     P_ss = sum(vecs[:, i] * vecs[:, i]' * P0 for i in idxs)
     ss_eb = diagm(P_ss) / sum(P_ss)
     return U * ss_eb * inv(U)
@@ -210,16 +215,16 @@ function ode_dynamics(L, ρ0, times; kwargs...)
     return solve(prob; saveat=times, kwargs...)
 end
 
-function bloch_redfield_ode_dynamics(H, a_ops, ρ0, times; c_ops=[], use_secular=true, secular_cutoff=0.1, return_states=false, kwargs...)
-    R, U= bloch_redfield_tensor(H, a_ops; c_ops=c_ops, use_secular=use_secular, secular_cutoff=secular_cutoff)
-    ρ0_eb = to_Heb(ρ0, U)
-    sol = ode_dynamics(R, ρ0, times; kwargs...)
-    if return_states
+# function bloch_redfield_ode_dynamics(H, a_ops, ρ0, times; c_ops=[], use_secular=true, secular_cutoff=0.1, return_states=false, kwargs...)
+#     R, U= bloch_redfield_tensor(H, a_ops; c_ops=c_ops, use_secular=use_secular, secular_cutoff=secular_cutoff)
+#     ρ0_eb = to_Heb(ρ0, U)
+#     sol = ode_dynamics(R, ρ0, times; kwargs...)
+#     if return_states
         
-    else
-        return sol
-    end
-end
+#     else
+#         return sol
+#     end
+# end
 
 function ode_dynamics_populations(L, ρ0, times; kwargs...)
     sol = ode_dynamics(L, ρ0, times; save_idxs=diagind(ρ0))

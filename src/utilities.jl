@@ -16,5 +16,9 @@ function projection(N, i, j)
     return copy(op)
 end
 
+herm_projection(N, i, j) = projection(N, i, j) + projection(N, j, i)
+
+is_herm(op) = (op == op') #Checks if operator is Hermitian
+
 to_Heb(op, U) = inv(U) * op * U
 from_Heb(op, U) = U * op * inv(U)
