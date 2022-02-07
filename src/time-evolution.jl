@@ -12,9 +12,9 @@
 
 # Inspired by QuantumOpticsBase.jl's liouvillian implementation but adapted to work with Zygote auto-diff
 
-spre(op::AbstractMatrix) = kron(I(size(op, 1)), transpose(op))
-spost(op::AbstractMatrix) = kron(op, I(size(op, 1)))
-# dagger(op::AbstractMatrix) = conj(transpose(op))
+spost(op::AbstractMatrix) = kron(permutedims(op), I(size(op, 1)))
+spre(op::AbstractMatrix) = kron(I(size(op, 1)), op)
+
 
 function liouvillian(H, c_ops)
     L = spre(-1im*H) + spost(1im*H)
@@ -34,11 +34,7 @@ function bloch_redfield_tensor(H::AbstractMatrix, a_ops::Array; c_ops=[], use_se
     
     H = Hermitian(complex(H))  # H must be complex so that ChainRules.eigen_rev rule works correctly
     # Use the energy eigenbasis
-    H_evals, transf_mat = eigen(H)
-    # H_evals, transf_mat = eigen(Zygote.@showgrad(H))
-    
-    #Define function for transforming to Hamiltonian eigenbasis
-    to_Heb(op, U) = inv(U) * complex(op) * U
+    H_evals, transf_mat = eigen(H)  
 
     N = length(H_evals) #Hilbert space dimension
     K = length(a_ops) #Number of system-env interation operators
@@ -146,7 +142,6 @@ function pauli_generator(H, a_ops)
     L = W_matrix - diagm(sum.(eachcol(W_matrix)))
 
     return L, transf_mat
-    # return copy(L), transf_mat
 end
 
 
@@ -169,7 +164,6 @@ end
 
 function bloch_redfield_steady_state(H, a_ops, ρ0; kwargs...)
     R, U = bloch_redfield_tensor(H, a_ops; kwargs...)
-    # R, U = bloch_redfield_tensor(Zygote.@showgrad(H), a_ops; kwargs...)
     ρ0_eb = inv(U) * ρ0 * U #Transform to eigenbasis
     ss_eb = steady_state(R, ρ0_eb)
     return U * ss_eb * inv(U) #Transform back from eigenbasis
@@ -178,7 +172,6 @@ end
 
 function pauli_steady_state(H, a_ops, ρ0)
     W, U = pauli_generator(H, a_ops)
-    # W, U = pauli_generator(Zygote.@showgrad(H), a_ops)
     ρ0_eb = inv(U) * ρ0 * U
     P0 = real(diag(ρ0_eb))
     vals, vecs = eigen(W)
@@ -215,6 +208,17 @@ end
 function ode_dynamics(L, ρ0, times; kwargs...)
     prob = ODEProblem((u, p, t) -> p * u, complex(reshape(ρ0, :)), extrema(times), L) #ODE 'parameters' are just the liouvillian matrix L
     return solve(prob; saveat=times, kwargs...)
+end
+
+function bloch_redfield_ode_dynamics(H, a_ops, ρ0, times; c_ops=[], use_secular=true, secular_cutoff=0.1, return_states=false, kwargs...)
+    R, U= bloch_redfield_tensor(H, a_ops; c_ops=c_ops, use_secular=use_secular, secular_cutoff=secular_cutoff)
+    ρ0_eb = to_Heb(ρ0, U)
+    sol = ode_dynamics(R, ρ0, times; kwargs...)
+    if return_states
+        
+    else
+        return sol
+    end
 end
 
 function ode_dynamics_populations(L, ρ0, times; kwargs...)
