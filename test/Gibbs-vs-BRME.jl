@@ -1,5 +1,5 @@
 
-using AutoDiffOQS, Zygote, FiniteDifferences, DifferentialEquations, DiffEqSensitivity, Plots
+using AutoDiffOQS, Zygote, FiniteDifferences, DifferentialEquations, DiffEqSensitivity#, Plots
 
 # Check that BRME & PME with only phonon processes relaxes to the correct Gibbs state and that auto-diff gradients agree
 
@@ -12,7 +12,7 @@ Hamiltonian(dE, J) = dE * sigma_z + J * sigma_x
 const kb_eV = AutoDiffOQS.kb / AutoDiffOQS.e
 nbe(w, T) = ( exp(abs(w) / (kb_eV * T)) - 1 )^-1.0
 Sw(w, T) =  w == 0 ? 0 : (nbe(w, T) + (w > 0))
-# Sw(w, T) =  w == 0 ? 0 : 1e-2*w^3*exp(-(w/0.5)^2)*(nbe(w, T) + (w > 0))
+# Sw(w, T) =  w == 0 ? 0 : 1e-2*abs(w)^3*exp(-(abs(w)/0.5)^2)*(nbe(w, T) + (w > 0))
 a_ops = [[projection(2, i, i), w -> Sw(w, T)] for i in 1:2]
 ρ0 = projection(2, 1, 1)
 
