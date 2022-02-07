@@ -33,7 +33,8 @@ end
 function bloch_redfield_tensor(H::AbstractMatrix, a_ops::Array; c_ops=[], use_secular=true, secular_cutoff=0.1)
     
     #Check that a_ops are all Hermitian
-    all(is_herm.(getindex(a_ops, 1))) || error("All 'A' operators must be Hermitian")
+    herm_check = is_herm.(getindex.(a_ops, 1))
+    all(herm_check) || error("All 'A' operators must be Hermitian\nNon-herm ops: $(.!(herm_check))")
 
     H = Hermitian(complex(H))  # H must be complex so that ChainRules.eigen_rev rule works correctly
     # Use the energy eigenbasis
@@ -118,7 +119,9 @@ end #Function
 function pauli_generator(H, a_ops)
 
     #Check that a_ops are all Hermitian
-    all(is_herm.(getindex(a_ops, 1))) || error("All 'A' operators must be Hermitian")
+    herm_check = is_herm.(getindex.(a_ops, 1))
+    all(herm_check) || error("All 'A' operators must be Hermitian\nNon-herm ops: $(.!(herm_check))")
+
 
     N = size(H, 1)
     K = length(a_ops)
