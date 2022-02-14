@@ -3,6 +3,9 @@
 const kb = 1.380649e-23
 const e = 1.602176634e-19
 
+# Physical functions 
+nbe(w, T) = ( exp(abs(w) / (kb_eV * T)) - 1 )^-1.0
+
 const sigma_x = [0 1; 1 0]
 const sigma_y = [0 -im; im 0]
 const sigma_z = [1 0; 0 -1]
