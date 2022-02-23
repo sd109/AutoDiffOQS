@@ -2,6 +2,7 @@
 # Physical constants
 const kb = 1.380649e-23
 const e = 1.602176634e-19
+const kb_eV = kb / e
 
 # Physical functions 
 nbe(w, T) = ( exp(abs(w) / (kb_eV * T)) - 1 )^-1.0
