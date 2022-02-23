@@ -161,10 +161,11 @@ end
 
 
 #Can't use nullspace method here because nullspace(::ComplexMatrix) internally uses non-julia functions for svd calc (unlike nullspace(::RealMatrix) case)
-function steady_state(L, ρ0)
+function steady_state(L, ρ0; tol=1e-15)
     ρ0_vec = reshape(ρ0, :)
     vals, vecs = eigen(L)
-    idxs = findall(abs.(vals) .< 1e-15)
+    idxs = findall(abs.(vals) .< tol)
+    length(idxs) == 0 && throw(error("Eigenvalues of L are all > $(tol). Are you sure the system reaches a steady state?"))
     ss_vec = sum(vecs[:, i] * vecs[:, i]' * ρ0_vec for i in idxs)
     ss = Array(reshape(ss_vec, size(ρ0)))
     return ss /= tr(ss)
@@ -192,7 +193,7 @@ end
 
 
 function gibbs_state(H, T)
-    A = exp(-e*H/(kb*T))
+    A = exp(-H/(kb_eV*T))
     B = tr(A)
     return A/B
 end
@@ -218,16 +219,14 @@ function ode_dynamics(L, ρ0, times; kwargs...)
     return solve(prob; saveat=times, kwargs...)
 end
 
-# function bloch_redfield_ode_dynamics(H, a_ops, ρ0, times; c_ops=[], use_secular=true, secular_cutoff=0.1, return_states=false, kwargs...)
-#     R, U= bloch_redfield_tensor(H, a_ops; c_ops=c_ops, use_secular=use_secular, secular_cutoff=secular_cutoff)
-#     ρ0_eb = to_Heb(ρ0, U)
-#     sol = ode_dynamics(R, ρ0, times; kwargs...)
-#     if return_states
-        
-#     else
-#         return sol
-#     end
-# end
+function bloch_redfield_ode_dynamics(H, a_ops, ρ0, times; c_ops=[], use_secular=true, secular_cutoff=0.1, kwargs...)
+    R, U = bloch_redfield_tensor(H, a_ops; c_ops=c_ops, use_secular=use_secular, secular_cutoff=secular_cutoff)
+    ρ0_eb = to_Heb(ρ0, U)
+    sol = ode_dynamics(R, ρ0_eb, times; kwargs...)
+    N = size(H, 1)
+    states = [from_Heb(reshape(sol[:, i], N, N), U) for i in 1:length(sol.t)]
+    return states
+end
 
 function ode_dynamics_populations(L, ρ0, times; kwargs...)
     sol = ode_dynamics(L, ρ0, times; save_idxs=diagind(ρ0))
